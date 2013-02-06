@@ -1,0 +1,295 @@
+package fileToDb;
+
+use dbiConfig;
+use Text::CSV::Simple;
+use Data::Dumper;
+use DateFunctions;
+use Logger;
+
+my $logger = new Logger;
+
+###
+sub new
+{
+    my $self = {};
+    bless $self;
+    return $self;
+}
+
+sub hourly
+	{
+		my ($self, $localPerlDir, $file, $san, $date, $hour, $reimport, $log) = @_;
+		my $csvParser = Text::CSV::Simple->new;
+		my $df = new DateFunctions;
+		
+		$csvParser->field_map(qw/date_hour siteId adId segmentId bid impressions clicks actions conversions spend/);
+		
+		if (open(IN, $localPerlDir."/hourly/".$file))
+		{
+			my @data = $csvParser->read_file($localPerlDir."/hourly/".$file);
+			
+			open(SQL, ">", "$localPerlDir/SQL_Test.txt");
+			
+			my $counter = 0;
+			my $block = 0;
+			my $valuesString;
+			my $SQL = '';
+			
+			my $sqlInsert = "INSERT INTO DisplayLogsHourly (date,hour,san,adid,siteid,segmentid,bid,impressions,clicks,actions,conversions,spend) VALUES\n";
+			foreach $data (@data)
+				{
+					$counter++;
+					if ($counter > 1)
+						{
+							my($day, $hour) = split(/\s/, $data->{'date_hour'});
+							my $date = $df->aol2mysqlDate($day);
+							$block++;
+							$values = "(".$date.",".sprintf("%d",$hour).",'$san',".$data->{'adId'}.",".$data->{'siteId'}.",".$data->{'segmentId'}.",".sprintf("%.2f", $data->{'bid'}).",".$data->{'impressions'}.",".$data->{'clicks'}.",".$data->{'actions'}.",".$data->{'conversions'}.",".$data->{'spend'}.")";
+							if ($block > 1) { $valuesString = $valuesString.",".$values; }
+							else { $valuesString = $valuesString.$values; }
+							
+							#1000 value params at a time
+#							if ($block == 1000)
+#								{
+#									my $sqlTemp = $sqlInsert.$valuesString.";\n";
+#									$SQL = $SQL.$sqlTemp;
+#									$block = 0;
+#									$valuesString = '';
+#								}
+						}
+				}
+			
+			# get rest
+			if ($valuesString ne '')
+				{
+					my $sqlTemp = $sqlInsert.$valuesString.";\n";
+					$SQL = $SQL.$sqlTemp;	
+				}
+				
+				## DBI
+				my $dbi = dbiConfig->dbiConnect('');
+				
+				## Execute SQL
+				## IF Re-Import, Delete Original Data First
+				if ($reimport == 1)
+					{
+						my $dSQL = "DELETE FROM DisplayLogsHourly WHERE san='$san' AND date='$date' and hour='$hour'";
+						my $dth = $dbi->prepare($dSQL);
+							$dth->execute();
+						$logger->write($log, "\n".DateFunctions->currentTime().": REIMPORT: ".$dth->rows." rows deleted for hour $hour.");
+							$dth->finish();
+					}
+				
+				my $sth = $dbi->prepare($SQL);
+					$sth->execute();
+				$logger->write($log, "\n".DateFunctions->currentTime().": $counter rows imported for hour $hour.");
+					$sth->finish();
+					$dbi->disconnect();
+				
+				print SQL $SQL;
+		}
+		else
+		{
+			$logger->write($log, "\nNO FILE: $san, $file");
+		}
+	}
+	
+sub daily
+	{
+		my ($self, $localPerlDir, $file, $san, $log) = @_;
+		my $csvParser = Text::CSV::Simple->new;
+		my $df = new DateFunctions;
+		
+		$csvParser->field_map(qw/date siteId adId segmentId bid impressions clicks actions conversions spend/);
+		
+		if(open(IN, $localPerlDir."/daily/".$file))
+		{
+		
+			my @data = $csvParser->read_file($localPerlDir."/daily/".$file);
+			
+			open(SQL, ">", "$localPerlDir/SQL_Daily_Test.txt");
+			
+			my $counter = 0;
+			my $block = 0;
+			my $valuesString;
+			my $SQL = '';
+			
+			my $sqlInsert = "INSERT INTO DisplayLogsDaily (date,san,adid,siteid,segmentid,bid,impressions,clicks,actions,conversions,spend) VALUES\n";
+			foreach $data (@data)
+				{
+					$counter++;
+					if ($counter > 1)
+						{
+							$block++;
+							my $date = $df->aol2mssqlDate($data->{'date'});
+							$values = "('".$date."','".$san."',".$data->{'adId'}.",".$data->{'siteId'}.",".$data->{'segmentId'}.",".sprintf("%.2f", $data->{'bid'}).",".$data->{'impressions'}.",".$data->{'clicks'}.",".$data->{'actions'}.",".$data->{'conversions'}.",".$data->{'spend'}.")";
+							if ($block > 1) { $valuesString = $valuesString.",".$values; }
+							else { $valuesString = $valuesString.$values; }
+							
+							#1000 value params at a time
+							if ($block == 1000)
+								{
+									my $sqlTemp = $sqlInsert.$valuesString.";\n";
+									$SQL = $SQL.$sqlTemp;
+									$block = 0;
+									$valuesString = '';
+								}
+						}
+				}
+			
+			# get rest
+			if ($valuesString ne '')
+				{
+					my $sqlTemp = $sqlInsert.$valuesString.";\n";
+					$SQL = $SQL.$sqlTemp;	
+				}
+				
+				## DBI
+				my $dbi = dbiConfig->dbiConnect('');
+				
+				## Execute SQL
+				my $sth = $dbi->prepare($SQL);
+					$sth->execute();
+					$sth->finish();
+					$dbi->disconnect();
+				$logger->write($log, "\n".DateFunctions->currentTime().": $counter rows of daily data imported.");
+				
+				print SQL $SQL;
+		}
+		else
+		{
+			$logger->write($log, "\nNO DAILY FILE: $san, $file");
+		}
+	}
+
+sub priceVolumeTest
+{
+	my ($self, $localPerlDir, $file, $san, $log) = @_;
+	my $df = new DateFunctions;
+	
+	if(open(IN, $localPerlDir."/priceVolume/".$file))
+	{
+		
+		my $row = 0;
+		my $counter = 0;
+		my $block = 0;
+		my @alpha = (0, 0, 0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1);
+		my $sql_ins = "INSERT INTO PriceVolumeTemp VALUES \n";
+		my $sql;
+		my $sql_val;
+		
+		while (<IN>)
+		{
+		  $row++;
+		  if ($row > 1) {
+		     my @pv = split(/,/, $_);
+		
+		     for ($i = 3; $i < scalar(@pv) - 2; $i++) {
+		       $counter++;
+		       $block++;
+		         my $vol = sprintf("%d", $pv[scalar(@pv)-1]);
+		         my $cvol = sprintf("%d", $pv[scalar(@pv)-2]);
+		         my $sql_tmp = "('$san', $pv[0], $pv[2], '$pv[1]', $pv[$i], $alpha[$i], $vol, $cvol)";
+		               if ($block > 1) { $sql_val = $sql_val.",".$sql_tmp; }
+		               else { $sql_val = $sql_val.$sql_tmp; }
+		
+		         ## Can Only Have One INSERT per 1000 entries
+		         if ($block == 1000) {
+		            my $sql_main = $sql_ins.$sql_val.";\n";
+		            $sql = $sql.$sql_main;
+		            $block = 0;
+		            $sql_val = '';
+		
+		          }
+		     }
+		  }
+		}
+		
+		if($row > 1)
+		{
+			## Get the rest
+			if ($sql_val ne '') {
+			   my $sql_main = $sql_ins.$sql_val.";\n";
+			   $sql = $sql.$sql_main;
+			   }
+			
+			## DBI
+			my $dbi = dbiConfig->dbiConnect('');
+	
+			## Execute SQL
+			my $sth = $dbi->prepare($sql);
+				$sth->execute();
+				$sth->finish();
+				$dbi->disconnect();
+			$logger->write($log, "\n".DateFunctions->currentTime().": $counter rows of daily data imported.");
+		}
+		else
+		{
+			$logger->write($log, "\nNO PV FILE: $san, $file");
+		}
+	}
+	else
+	{
+		$logger->write($log, "\nNO PV FILE: $san, $file");
+	}
+}
+
+sub priceVolume
+{
+	my ($self, $localPerlDir, $file, $san, $log) = @_;
+	my $df = new DateFunctions;
+	open(OUT, ">".$localPerlDir."/priceVolume/".$san."\_pv\_out.txt");
+
+
+	if(open(IN, $localPerlDir."/priceVolume/".$file))
+	{ 
+		my $row = 0;
+		my $counter = 0;
+		my @alpha = (0, 0, 0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1);
+		
+		while (<IN>)
+		{
+		  $row++;
+		  if ($row > 1) {
+		     my @pv = split(/,/, $_);
+		
+		     for ($i = 3; $i < scalar(@pv) - 2; $i++) {
+		       $counter++;
+		         my $vol = sprintf("%d", $pv[scalar(@pv)-1]);
+		         my $cvol = sprintf("%d", $pv[scalar(@pv)-2]);
+		         print OUT "'$san', $pv[0], $pv[2], '$pv[1]', $pv[$i], $alpha[$i], $vol, $cvol\n";         
+		     }
+                  }
+		}
+		
+		if($row > 1)
+		{	
+                    my $infile = $localPerlDir."/priceVolume/".$san."\_pv\_out.txt";
+			## DBI
+			my $dbi = dbiConfig->dbiConnect('');
+                        my $sql = qq| LOAD DATA LOCAL INFILE '$infile' INTO TABLE PriceVolumeTemp FIELDS TERMINATED BY ',' LINES TERMINATED BY '\n' |;
+
+			## Execute SQL
+			my $sth = $dbi->prepare($sql);
+				$sth->execute();
+				$sth->finish();
+				$dbi->disconnect();
+			$logger->write($log, "\n".DateFunctions->currentTime().": $counter rows of daily data imported.");
+                }
+		else
+		{
+			$logger->write($log, "\nNO PV FILE: $san, $file");
+		}
+        }
+	else
+	{
+		$logger->write($log, "\nNO PV FILE: $san, $file");
+	}           
+
+        close OUT;
+
+}
+
+
+1;
+	

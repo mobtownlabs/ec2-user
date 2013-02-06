@@ -1,0 +1,57 @@
+#!/usr/bin/perl
+
+use DBI;
+use apiConfig;
+use dataLoader;
+use dataImport;
+use dbiConfig;
+use DateFunctions;
+
+my $dbi = dbiConfig->dbiConnect('localMySQL');
+my ($yesterdayDate) = (DateFunctions->getGMTDateHour(0,0))[2];
+
+&hourly("2012-01-20", 0);
+#&aggregate($yesterdayDate);
+exit;
+
+sub aggregate
+{
+    my ($date) = @_;
+    my $di = new dataImport;
+
+    my $dir = "/home/ec2-user/prod/cdo/aol/logs";
+
+        print "Running for $date\n";
+        $di->aggregate($date, $dir);
+
+$dbi->disconnect();
+}
+
+sub hourly
+{
+    my ($date, $h) = @_;
+    my $di = new dataImport;
+
+    open($log, ">/home/ec2-user/sandbox/cdo/aol/bin/manual.txt");
+
+    my $sql = qq|SELECT cid,san FROM Campaign WHERE isapi=1 AND cid in(200095, 200218)|;
+    my $sth = $dbi->prepare($sql);
+    $sth->execute();
+
+    while(my($cid, $san) = $sth->fetchrow_array)
+    {
+        system("mkdir /home/ec2-user/prod/cdo/aol/in/$cid");
+        my $localDir = "/home/ec2-user/prod/cdo/aol/in/$cid/hourly";
+
+            #for ($h=0; $h<24; $h++)
+            #{
+                $di->hourlyImport($date, $h, $cid, $san, $localDir, $localDir, $log);
+            #}
+    }
+    
+    $sth->finish();
+
+
+    $dbi->disconnect();
+    close $log;
+}

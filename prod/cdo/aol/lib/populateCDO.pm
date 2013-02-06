@@ -1,0 +1,256 @@
+package populateCDO;
+
+use apiOps;
+use Logger;
+use cellOps;
+use commonData;
+use apiConfig;
+
+my $pageSize = apiConfig->getCommonParam('curationPageSize');
+
+sub new
+{
+    my $self = {};
+    bless $self;
+    return $self;
+}
+
+sub getNewCells
+{
+    my ($self, $cid, $san, $log) = @_;
+
+    my $cellOps = cellOps->new();
+    my $commonData = commonData->new();
+    my $logger = Logger->new();
+
+    my $newLog = $logger->openFile(apiConfig->getCommonParam('localExportDir')."/network", "newCells.txt");
+
+    my $cellCount;
+    @$cellInfo = ();
+    my ($cellGroupId, $cellGroupName) = $cellOps->getNewCellGroupId($cid);
+    #my $cell = $commonData->getCdoTestCells($san);
+    
+    $logger->write($log, "\n\n+++++++++++++++++++++++++++++++++++++++++++++++");
+    $logger->write($log, "\n".DateFunctions->currentTime().": $san ($cid)");
+    $logger->write($log, "\n+++++++++++++++++++++++++++++++++++++++++++++++");
+    $logger->write($log, "\n".DateFunctions->currentTime().": (GroupID: $cellGroupId, GroupType: $cellGroupName)");
+
+    ## GET NEW CELLS
+    if ($cellGroupId ne 'Paused')
+    {
+       my ($cellInfo, $pageIndex) = $cellOps->getCells($cid, $cellGroupId, 0, $pageSize);
+       my $cellCount = scalar(@$cellInfo);
+								
+	if ($cellCount > 0)
+        {
+            ## INSERT New Cells
+            my ($rows) = $cellOps->cellInsertTest($cellInfo, $san, 1);
+            $logger->write($log, "\n-->$cellCount new cells out of API ($rows actually inserted).");
+            #$logger->write($log, "\n-->$rows actually inserted.");            
+            
+            if ($cellCount > ($pageSize-1))
+            {
+                do ## More than 50,000 cells, run again until less than
+                {
+                    $pageIndex++;
+                    $logger->write($log, "\nNeed to run again (page $pageIndex)");
+                    my ($cellInfo, $pageIndex) = $cellOps->getCells($cid, $cellGroupId, $pageIndex, $pageSize);
+                    $cellCount = scalar(@$cellInfo);
+                    my ($rows) = $cellOps->cellInsertTest($cellInfo, $san, 1);
+                    $logger->write($log, "\n-->$cellCount new cells out of API ($rows actually inserted).");
+                    #$logger->write($log, "\n-->$rows actually inserted.");
+                    
+                }
+                until ($cellCount < $pageSize);
+            }
+            
+            $logger->write($log, "\nNo further need to re-run.");
+        }
+       else
+       {
+           $logger->write($log, "\n->No New cells.");
+       }
+    }
+    else 
+    {
+        $logger->write($log, "\n->$san is Paused!");
+    }
+
+}
+
+sub getExistingCells
+{
+    my ($self, $cid, $san, $log) = @_;
+
+    my $cellOps = cellOps->new();
+    my $commonData = commonData->new();
+    my $logger = Logger->new();
+
+    my $cellCount;
+    @$cellInfo = ();
+    my ($cellGroupId, $cellGroupName) = $cellOps->getUngroupedCellGroupId($cid);
+    #my $cell = $commonData->getCdoTestCells($san);
+    
+    $logger->write($log, "\n\n+++++++++++++++++++++++++++++++++++++++++++++++");
+    $logger->write($log, "\n".DateFunctions->currentTime().": $san");
+    $logger->write($log, "\n+++++++++++++++++++++++++++++++++++++++++++++++");
+    $logger->write($log, "\n".DateFunctions->currentTime().": (GroupID: $cellGroupId, GroupType: $cellGroupName)");
+
+    ## GET EXISTING CELLS
+    if ($cellGroupId ne 'Paused')
+    {
+       my ($cellInfo, $pageIndex) = $cellOps->getCells($cid, $cellGroupId, 0, $pageSize);
+       my $cellCount = scalar(@$cellInfo);
+								
+	if ($cellCount > 0)
+        {
+            ## INSERT Existing Cells
+            my ($rows) = $cellOps->cellInsertTest($cellInfo, $san, 0);
+            $logger->write($log, "\n-->$cellCount new cells out of API ($rows actually inserted).");
+            #$logger->write($log, "\n-->$rows actually inserted.");
+                        
+            
+            if ($cellCount > ($pageSize-1))
+            {
+                do ## More than 50,000 cells, run again until less than
+                {
+                    $pageIndex++;
+                    $logger->write($log, "\nNeed to run again (page $pageIndex)");
+                    my ($cellInfo, $pageIndex) = $cellOps->getCells($cid, $cellGroupId, $pageIndex, $pageSize);
+                    $cellCount = scalar(@$cellInfo);
+                    my ($rows) = $cellOps->cellInsertTest($cellInfo, $san, 0);
+                    $logger->write($log, "\n-->$cellCount new cells out of API ($rows actually inserted).");
+                    #$logger->write($log, "\n-->$rows actually inserted.");
+                    
+                }
+                until ($cellCount < $pageSize);
+            }
+            
+            $logger->write($log, "\nNo further need to re-run.");
+        }
+       else
+       {
+           $logger->write($log, "\n->No New cells.");
+       }
+    }
+    else
+    {
+        $logger->write($log, "\n->$san is Paused!");
+    }
+        
+}
+
+sub markOldCells
+{
+    my ($self, $cid, $san, $log) = @_;
+
+    my $cellOps = cellOps->new();
+    my $commonData = commonData->new();
+    my $logger = Logger->new();
+
+    my $cellCount;
+    @$cellInfo = ();
+    my ($cellGroupId, $cellGroupName) = $cellOps->getRemovedCellGroupId($cid);
+    #my $cell = $commonData->getCdoTestCells($san);
+    
+    $logger->write($log, "\n\n+++++++++++++++++++++++++++++++++++++++++++++++");
+    $logger->write($log, "\n".DateFunctions->currentTime().": $san");
+    $logger->write($log, "\n+++++++++++++++++++++++++++++++++++++++++++++++");
+    $logger->write($log, "\n".DateFunctions->currentTime().": (GroupID: $cellGroupId, GroupType: $cellGroupName)");
+
+    ## GET REMOVED CELLS
+    if ($cellGroupId ne 'Paused')
+    {
+       my ($cellInfo, $pageIndex) = $cellOps->getRemovedCells($cid, $cellGroupId, 0, $pageSize);
+       my $cellCount = scalar(@$cellInfo);
+								
+	if ($cellCount > 0)
+        {
+            ## MARK Removed Cells
+            my ($err, $rows, $marked) = $cellOps->cellDeleteTest($cellInfo);
+            $logger->write($log, "\n-->$cellCount removed cells out of API ($marked actually marked).");
+                        
+            
+            if ($cellCount > ($pageSize-1))
+            {
+                do ## More than 50,000 cells, run again until less than
+                {
+                    $pageIndex++;
+                    $logger->write($log, "\nNeed to run again (page $pageIndex)");
+                    my ($cellInfo, $pageIndex) = $cellOps->getRemovedCells($cid, $cellGroupId, $pageIndex, $pageSize);
+                    $cellCount = scalar(@$cellInfo);
+                    my ($err, $rows, $marked) = $cellOps->cellDeleteTest($cellInfo);
+                    $logger->write($log, "\n-->$cellCount removed cells out of API ($marked actually marked).");
+                    #$logger->write($log, "\n-->$rows actually inserted.");
+                    
+                }
+                until ($cellCount < $pageSize);
+            }
+            
+            $logger->write($log, "\nNo further need to re-run.");
+        }
+       else
+       {
+           $logger->write($log, "\n->No Removed cells.");
+       }
+    }
+    else
+    {
+        $logger->write($log, "\n->$san is Paused!");
+    }
+
+}
+
+sub groupNewCells
+{
+    my ($self, $log) = @_;
+
+    my $cellOps = cellOps->new();
+    my $logger = Logger->new();
+    my $apiOps = apiOps->new();
+
+    ## Create Queue
+    $logger->write($log, "\n".DateFunctions->currentTime().": Creating New Cells Queue.");
+    my ($rows) = $cellOps->newCellQueue();
+    $logger->write($log, "\n".DateFunctions->currentTime().": Done ($rows cells added to queue).");
+
+    ## Distribute Cells
+    $logger->write($log, "\n".DateFunctions->currentTime().": Distributing New Cells.");
+    $cellOps->distributeNewCells($log);
+    $logger->write($log, "\n".DateFunctions->currentTime().": Done.");
+
+}
+
+sub removeOldCells
+{
+    my ($self, $log) = @_;
+
+    my $cellOps = cellOps->new();
+    my $logger = Logger->new();
+
+    ## Create Queue
+    $logger->write($log, "\n".DateFunctions->currentTime().": Creating Old Cells Queue.");
+    my ($rows) = $cellOps->oldCellQueue();
+    $logger->write($log, "\n".DateFunctions->currentTime().": Done ($rows cells added to queue).");
+
+    ## Acknowledge Cells
+    $logger->write($log, "\n".DateFunctions->currentTime().": Acknowledging Old Cells.");
+    #$cellOps->acknowledgeOldCells($log);
+    $logger->write($log, "\n".DateFunctions->currentTime().": Done.");
+
+}
+
+sub updateNetwork
+{
+    my ($self, $log) = @_;
+
+    my $cellOps = cellOps->new();
+    my $logger = Logger->new();
+
+    $logger->write($log, "\n".DateFunctions->currentTime().": Creating Updated Network of cells.");
+    my ($rows) = $cellOps->updateNetwork();
+    $logger->write($log, "\n".DateFunctions->currentTime().": Done ($rows active cells in updated network).");
+
+}
+
+1;

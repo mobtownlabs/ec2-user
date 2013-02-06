@@ -1,0 +1,146 @@
+package mediaOps;
+
+use dbiConfig;
+use apiUtils;
+use commonData;
+use Switch;
+use Logger;
+use DateFunctions;
+
+my $logger = new Logger;
+
+sub new
+{
+    my $self = {};
+    bless $self;
+    return $self;
+}
+
+sub checkNewMedia
+{
+	my ($self, $cI, $log) = @_;
+	
+	#DBI
+	my $dbi = dbiConfig->dbiConnect('cdo');
+	
+	
+	# Objects Needed
+	my $cd = new commonData;
+	my $au = new apiUtils;
+	my $ac = new apiConfig;
+	
+	$logger->write($log, "\n\n".DateFunctions->currentTime().": Checking for new Media...");
+	
+	# Get list of current media
+	my $mediaRef = $cd->getMedia('hash');
+	
+	# Check For New Media For Each Campaign
+	foreach $c (@$cI)
+		{
+			my $mI = $c->{'mediaList'}{'media'};
+			my $san = $c->{'deliveryInformation'}{'systemAccountName'}; $san =~ s/\s//g;
+			my $adCount = 0;
+			$logger->write($log, "\n           -> Campaign: ".$c->{'deliveryInformation'}{'systemAccountName'});
+			
+			foreach $m (@$mI)
+				{
+					if (!$mediaRef->{$m->{'id'}})
+						{
+							$adCount++;
+							my $sizeCode = &convertSizeCode($m->{'basicInformation'}{'sizeCode'});
+							my $mName = $m->{'basicInformation'}{'name'};
+							if ($sizeCode ne '')
+							{
+								$logger->write($log, "\n             -> Adding MEDIA: id=$m->{'id'}, name=$mName, size=$sizeCode, paused=$m->{'deliveryInformation'}{'paused'}");
+								my $sql = "INSERT INTO Media (san, adid, size) VALUES ('$san', $m->{'id'}, '$sizeCode')";
+								
+								my $sth = $dbi->prepare($sql);
+								$sth->execute();
+								$sth->finish();
+					
+								if (!$sth->err)
+									{
+										$logger->write($log, "\n              --> $m->{'id'} added successfully!");
+									}
+							}
+							else
+							{
+								$logger->write($log, "\n            -> Cannot add $m->{'id'}: size ".$m->{'basicInformation'}{'sizeCode'}." does not match the lookup.");
+							}
+						}
+					else 
+						{
+							#print "$m->{'id'} already exists.\n";
+						}
+				}
+			if ($adCount == 0)
+			{
+				$logger->write($log, "\n             -> No new ads.");
+			}
+		}
+	
+	#disconnect from dbi
+	$dbi->disconnect();
+}
+
+sub convertSizeCode
+{
+	my($sizeIn) = @_;
+	my $sizeOut;
+	
+	switch($sizeIn)
+		{
+			case "160600"
+				{
+					$sizeOut = "160x600"
+				}
+			case "300250"
+				{
+					$sizeOut = "300x250"
+				}
+			case "72890"
+				{
+					$sizeOut = "728x90"
+				}
+			case "728090"
+				{
+					$sizeOut = "728x90"
+				}
+			case "120600"
+				{
+					$sizeOut = "120x600"
+				}
+			case "46860"
+				{
+					$sizeOut = "468x60"
+				}
+			case "468060"
+				{
+					$sizeOut = "468x60"
+				}
+			case "180150"
+				{
+					$sizeOut = "180x150"
+				}
+			case "23460"
+				{
+					$sizeOut = "234x60"
+				}
+			case "234060"
+				{
+					$sizeOut = "234x60"
+				}
+			case "425600"
+				{
+					$sizeOut = "425x600"
+				}
+			case "300600"
+				{
+					$sizeOut = "300x600"
+				}
+		}
+		
+	return($sizeOut);
+}
+
+1;

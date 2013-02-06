@@ -1,0 +1,77 @@
+#!/usr/bin/perl
+
+use DBI;
+use apiConfig;
+use dataLoader;
+use dataImport;
+use dbiConfig;
+
+my $dbi = dbiConfig->dbiConnect('localMySQL');
+
+my $mode=shift;
+
+
+if ($mode eq 'agg')
+{
+my $di = new dataImport;
+
+my $month = "2012-01-";
+my $dir = "/home/ec2-user/prod/cdo/aol";
+
+for ($d=1; $d<3; $d++)
+{
+  my $day;
+  if($d<10){$day = "0".$d;}
+  else {$day=$d;}
+  my $date = $month.$day;
+
+  print "Running for $date\n";
+  $di->aggregate($date, $dir);
+}
+
+$dbi->disconnect();
+
+exit;
+}
+
+elsif($mode eq 'hourly')
+{
+my $di = new dataImport;
+
+my $month = "2012-01-";
+my $dir = "/home/ec2-user/prod/cdo/aol";
+
+open($log, ">/home/ec2-user/sandbox/cdo/aol/bin/manual.txt");
+
+my $sql = qq|SELECT cid,san FROM Campaign WHERE isapi=1 AND cid|;
+my $sth = $dbi->prepare($sql);
+$sth->execute();
+
+while(my($cid, $san) = $sth->fetchrow_array)
+{
+    system("mkdir /home/ec2-user/prod/cdo/aol/in/$cid");
+    my $localDir = "/home/ec2-user/prod/cdo/aol/in/$cid";
+    for ($d=15; $d<16; $d++)
+    {
+	my $day;
+	if($d<10){$day = "0".$d;}
+	else {$day=$d;}
+	my $date = $month.$day;
+
+	for ($h=0; $h<24; $h++)
+	{
+	    $di->hourlyImport($date, $h, $cid, $san, $localDir, $localDir, $log);
+	}
+
+    }
+
+}
+
+$sth->finish();
+
+
+$dbi->disconnect();
+close $log;
+
+exit;
+}

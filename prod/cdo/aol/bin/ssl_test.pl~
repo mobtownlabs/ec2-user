@@ -1,0 +1,14 @@
+use LWP::UserAgent;
+$ENV{HTTPS_DEBUG} = 1;
+$ENV{HTTPS_CA_DIR} = '/etc/ssl/certs';
+$ENV{HTTPS_CA_FILE} =  '/etc/ssl/certs/ca-bundle.crt';
+
+my $agent = LWP::UserAgent->new;
+$agent-> get("https://api.adlearnop.advertising.com");
+
+foreach $key (keys %ENV)
+{
+    print "$key: $ENV{$key}\n";
+}
+
+exit;

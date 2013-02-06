@@ -1,0 +1,205 @@
+package campConfig;
+
+use mediaOps;
+use campOps;
+use cellOps;
+use commonData;
+use apiOps;
+use apiConfig;
+use DateFunctions;
+use Logger;
+
+sub new
+{
+    my $self = {};
+    bless $self;
+    return $self;
+}
+
+sub downstreamImport
+{	
+	my ($self, $dow, $hour, $log) = @_;
+	
+	my $co = new campOps;
+	my $mo = new mediaOps;
+	my $ceo = new cellOps;
+	my $cd = new commonData;
+	my $ao = new apiOps;
+	my $ac = new apiConfig;
+	my $logger = new Logger;
+	
+	# Update Current Campaign Status
+	#	$co->updateCampaignStatus($log);
+	
+	# New Campaign Check
+		my ($cI, $newCamp) = $co->checkNewCamps($dow, $hour, $log);
+		
+	# New Media Check
+		$mo->checkNewMedia($cI, $log);
+	
+	# New Cell Check
+	my $import = &checkCellImportHour($hour);
+	if($import == 1) ### Only do cell import for certain hours (see apiConfig)
+	{
+		my ($cell) = $cd->getCdoCells();
+	
+		foreach my $c (@$cI)
+			{
+			
+				my $cellCount;
+				@$cellInfo = ();
+				@$removedCellInfo = ();
+				my ($newCellGroupId, $newCellGroupName) = $ceo->getNewCellGroupId($c->{'id'});
+				my $san = $c->{'deliveryInformation'}{'systemAccountName'}; $san =~ s/\s//g;
+				my $paused = $c->{'deliveryInformation'}{'paused'};
+				$logger->write($log, "\n\n+++++++++++++++++++++++++++++++++++++++++++++++");
+				$logger->write($log, "\n".DateFunctions->currentTime().": $san");
+				$logger->write($log, "\n+++++++++++++++++++++++++++++++++++++++++++++++");
+				
+				$logger->write($log, "\n".DateFunctions->currentTime().": (GroupID: $newCellGroupId, GroupType: $newCellGroupName)");
+				
+				if ($paused eq "false")
+					{
+						if ($newCellGroupId ne "Paused")
+							{
+								## GET NEW CELLS
+								my ($cellInfo, $pageIndex) = $ceo->getCells($c->{'id'}, $newCellGroupId, 0);
+								my $cellCount = scalar(@$cellInfo);
+								
+										if ($cellCount > 0)
+										{
+											## INSERT New Cells
+											my ($rows) = $ceo->cellInsert($cell, $cellInfo, $dow, $hour, $san);
+											$logger->write($log, "\n->$cellCount new cells out of API.");
+											$logger->write($log, "\n-->$rows actually inserted.");
+											
+											## Distribute cells to UNGROUPED GROUP, IF NEW
+											if($ac->getCommonParam('newGroupName') eq 'NEW')
+												{
+													#my($request, $hashOut, $xmlOut) = 
+													#$ao->apiAction("distributeCellList", $cellInfo);
+													#print "\n$xmlOut";
+												}
+											
+											
+											if ($cellCount > 49999)
+												{
+													do ## More than 50,000 cells, run again until less than
+														{
+															$pageIndex++;
+																$logger->write($log, "\nNeed to run again (page $pageIndex)");
+																my ($cellInfo, $pageIndex) = $ceo->getCells($c->{'id'}, $newCellGroupId, $pageIndex);
+																$cellCount = scalar(@$cellInfo);
+																my ($rows) = $ceo->cellInsert($cell, $cellInfo, $dow, $hour, $san);
+																$logger->write($log, "\n->$cellCount new cells out of API.");
+																$logger->write($log, "\n-->$rows actually inserted.");
+																
+																## Distribute cells to UNGROUPED GROUP, IF NEW
+																if($ac->getCommonParam('newGroupName') eq 'NEW')
+																	{
+																		#my($request, $hashOut, $xmlOut) = 
+																		#$ao->apiAction("distributeCellList", $cellInfo);
+																		#print "\n$xmlOut";
+																	}
+														}
+													until ($cellCount < 50000);
+												}
+													
+												$logger->write($log, "\nNo further need to re-run.");
+										}
+										else
+										{
+											$logger->write($log, "\n->No New cells.");
+										}
+		# Old Cell Check			
+								## GET Removed Cells
+								my ($removedCellGroupId, $removedCellGroupName) = $ceo->getRemovedCellGroupId($c->{'id'});
+								my ($removedCellInfo, $pageIndex) = $ceo->getRemovedCells($c->{'id'}, $removedCellGroupId, 0);
+								my $removedCellCount = scalar(@$removedCellInfo);
+								$logger->write($log, "\n".DateFunctions->currentTime().": (GroupID: $removedCellGroupId, GroupType: $removedCellGroupName)");
+								$logger->write($log, "\n-->$removedCellCount cells listed as removed.");
+								
+									if ($removedCellCount > 0)
+										{
+											## DELETE Removed Cells	
+											my ($error, $rows)	= $ceo->cellDelete($removedCellInfo, $cell);
+												if ($error eq '')
+													{
+														$logger->write($log, "\nRemoved $rows cells from database.");
+														#my($request, $hashOut, $xmlOut) = 
+														#$ao->apiAction("acknowledgeRemovedCellList", $removedCellInfo);
+														#$logger->write($log, "\n$xmlOut");
+													}
+												else
+													{
+														$logger->write($log, "\nWARNING: could not delete from database --> did not ackonwledge the removed cells.");
+													}
+													
+												if ($removedCellCount > 49999)
+													{
+														do ## If = 50,000 cells, run again until less than
+															{
+																$pageIndex++;
+																	$logger->write($log, "\nNeed to run again (page $pageIndex)");
+																	my ($removedCellInfo, $pageIndex) = $ceo->getRemovedCells($c->{'id'}, $removedCellGroupId, $pageIndex);
+																	$removedCellCount = scalar(@$removedCellInfo);
+																	$logger->write($log, "\n-->$removedCellCount more cells listed as removed.");
+																	my ($error, $rows)	= $ceo->cellDelete($removedCellInfo, $cell);
+																		if ($error eq '')
+																			{
+																				$logger->write($log, "\nRemoved $rows cells from database.");
+																				#my($request, $hashOut, $xmlOut) = 
+																				#$ao->apiAction("acknowledgeRemovedCellList", $removedCellInfo);
+																				#$logger->write($log, "\n$xmlOut");
+																			}
+																		else
+																			{
+																				$logger->write($log, "\nWARNING: could not delete from database --> did not ackonwledge the removed cells.");
+																			}
+															}
+														until ($removedCellCount < 50000);
+													}
+														
+													$logger->write($log, "\n-->No further need to re-run.");
+										}
+									else
+										{
+											$logger->write($log, "\n-->No cells to remove.");
+										}
+							}
+						else
+							{
+								$logger->write($log, "\n-->No cell groups");
+							}
+					}
+				else
+					{
+						$logger->write($log, "\n$san is PAUSED!");
+					}
+			}
+	undef %{$cell};
+	}
+}
+
+
+###LOCAL SUBS
+sub checkCellImportHour
+{
+	my ($hour) = @_;
+	my $ac = new apiConfig;
+	my $dsHours = $ac->getCommonParam('hourToImportCells');
+	my @dsHours = split(/-/, $dsHours);
+	my $import = 0;
+	
+	foreach my $ds (@dsHours)
+	{
+		if($ds == $hour)
+		{
+			$import = 1;
+		}
+	}
+	
+	return $import;
+}
+
+1;

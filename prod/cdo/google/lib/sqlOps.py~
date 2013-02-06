@@ -1,0 +1,9 @@
+import MySQLdb as mysql
+
+def getCampaigns:
+    db = mysql.connect(host="localhost",db="cdo",read_default_file="~/.my.cnf")
+    
+    sql = """SELECT * FROM Campaign WHERE isapi=1 AND usepoe=1"""
+    /*HELLO*/
+    
+    

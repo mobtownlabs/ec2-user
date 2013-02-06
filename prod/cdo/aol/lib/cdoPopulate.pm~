@@ -1,0 +1,706 @@
+package cdoPopulate;
+
+use dbiConfig;
+use DateFunctions;
+use Logger;
+
+my $logger = new Logger;
+
+sub new
+{
+	my $self = {};
+	bless $self;
+	return $self;
+}
+
+sub populateCdoKnaData
+{
+	my ($self, $dow, $hour, $log) = @_;
+	
+	## DBI
+	my $dbi = dbiConfig->dbiConnect('');
+
+### RESET ALL KNA DATA FOR CURRENT HOUR
+		my $sql = qq|
+			UPDATE dbo.CdoDataAol
+			SET impressions = 0, actions = 0, avail_impressions = 0, avail_capped_impressions = 0,
+				sssd_impressions = 0, sssd_actions = 0, sssd_cells = 0,
+				szd_impressions = 0, szd_actions = 0, szd_cells = 0,
+				ssd_impressions = 0, ssd_actions = 0, ssd_cells = 0,
+				sd_impressions = 0, sd_actions = 0, sd_cells = 0,
+				zd_impressions = 0, zd_actions = 0, zd_cells = 0,
+				cps_impressions = 0, cps_actions = 0, cps_cells = 0,
+				cpssd_impressions = 0, cpssd_actions = 0, cpssd_cells = 0,
+				cpsssd_impressions = 0, cpsssd_actions = 0, cpsssd_cells = 0,
+				dow=$dow, hour=$hour, dateUpdated=getDate()
+				|;
+
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> Imp/Action Data Reset: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+
+### UPDATE ADGROUP/SIZE INFO
+
+		my $sql = qq|
+			UPDATE dbo.CdoDataAol
+			SET CdoDataAol.adgroup=m.adgroup, CdoDataAol.size=m.size, CdoDataAol.dateUpdated=getDate()
+			FROM (
+				SELECT adid as adid, adgroup as adgroup, size as size
+					FROM Media
+				)m
+				
+			INNER JOIN
+			dbo.cdoDataAol
+				ON
+				cdoDataAol.adid=m.adid
+					|;
+					
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> Adgroup/Size Update: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+		
+### UPDATE AVAIL_IMP INFO
+
+		my $sql = qq|
+			UPDATE dbo.CdoDataAol
+			SET cdoDataAol.avail_impressions=ev.volume, cdoDataAol.avail_capped_impressions=ev.capped_volume
+			FROM (
+				SELECT siteid as siteid, segmentid as segmentid, size as size, volume as volume, capped_volume as capped_volume
+				FROM eVolume
+				) ev
+			
+			INNER JOIN
+			dbo.cdoDataAol
+				ON
+				cdoDataAol.siteid=ev.siteid
+				AND cdoDataAol.segmentid=ev.segmentid
+				AND cdoDataAol.size=ev.size
+					|;
+					
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> Avail Imps Update: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+
+### CELL LEVEL
+		my $sql = qq|	
+			UPDATE dbo.CdoDataAol
+			SET CdoDataAol.impressions=dlh.impressions, CdoDataAol.actions=dlh.actions, CdoDataAol.dateUpdated=getDate(), CdoDataAol.data_status=dlh.data_status
+			FROM (
+					/**** Day of Week + Hour of Day ****/
+						/* GRAB ACTUAL DATA + MATCHED SEEDED DATA */
+					SELECT datepart(weekday, dl.date) as dow, dl.hour, dl.san as san, dl.adid as adid, dl.siteid as siteid, dl.segmentid as segmentid, sum(dl.impressions) + isnull(sum(s.impressions),0) as impressions,
+			            sum(dl.actions) + isnull(sum(s.actions),0) as actions, 'DOW-Hourly' as data_status
+			                   FROM dbo.DisplayLogsHourly dl LEFT JOIN dbo.DisplaySeedHourly s
+			                   ON (s.adid=dl.adid AND s.siteid=dl.siteid AND s.segmentid=dl.segmentid AND s.date=dl.date AND s.hour=dl.hour), dbo.Media m, dbo.Campaign c
+			                        WHERE dl.adid = m.adid
+			                        AND dl.san = c.san
+			                        AND c.usepoe = 1
+			                        AND m.active = 1
+			                        AND datepart(weekday, dl.date) = $dow
+			                        AND dl.hour = $hour
+			                        AND c.timeStatus = 3
+			                    GROUP BY datepart(weekday, dl.date), dl.hour, dl.san, dl.adid, dl.siteid, dl.segmentid
+			                    HAVING sum(dl.impressions) + isnull(sum(s.impressions),0) > 0
+			                   UNION
+			                   
+			            /* MERGE IN UNMATCHED SEEDED DATA */
+			        SELECT datepart(weekday, s.date) as dow, s.hour, m.san as san, s.adid as adid, s.siteid as siteid, s.segmentid as segmentid, sum(s.impressions) + isnull(sum(dl.impressions),0) as impressions,
+			            sum(s.actions) + isnull(sum(dl.actions),0) as actions, 'DOW-Hourly' as data_status
+			                   FROM dbo.DisplaySeedHourly s LEFT OUTER JOIN dbo.DisplayLogsHourly dl
+			                        ON (s.adid=dl.adid AND s.siteid=dl.siteid AND s.segmentid=dl.segmentid AND s.date=dl.date AND s.hour=dl.hour),
+			                        dbo.Media m, dbo.Campaign c
+			                        WHERE s.adid = m.adid
+			                        AND m.san = c.san
+			                        AND c.usepoe = 1
+			                        AND m.active = 1
+			                        AND datepart(weekday, s.date) = $dow
+			                        AND s.hour = $hour
+			                        AND c.timeStatus = 3
+			                    GROUP BY datepart(weekday, s.date), s.hour, m.san, s.adid, dl.adid, s.siteid, s.segmentid
+			                    HAVING sum(s.impressions) > 0
+			                   UNION
+			                   
+					/**** HOUR OF DAY ****/
+			            /* GRAB ACTUAL DATA + MATCHED SEEDED DATA */
+			        SELECT cast($dow as int) as dow, dl.hour, dl.san as san, dl.adid as adid, dl.siteid as siteid, dl.segmentid as segmentid, sum(dl.impressions) + isnull(sum(s.impressions),0) as impressions,
+			            sum(dl.actions) + isnull(sum(s.actions),0) as actions, 'Hourly' as data_status
+			                   FROM dbo.DisplayLogsHourly dl LEFT JOIN dbo.DisplaySeedHourly s
+			                   ON (s.adid=dl.adid AND s.siteid=dl.siteid AND s.segmentid=dl.segmentid AND s.date=dl.date AND s.hour=dl.hour), dbo.Media m, dbo.Campaign c
+			                        WHERE dl.adid = m.adid
+			                        AND dl.san = c.san
+			                        AND c.usepoe = 1
+			                        AND m.active = 1
+			                        AND dl.hour = $hour
+			                        AND c.timeStatus = 2
+			                    GROUP BY dl.hour, dl.san, dl.adid, dl.siteid, dl.segmentid
+			                    HAVING sum(dl.impressions) + isnull(sum(s.impressions),0) > 0
+			                   UNION
+			
+			            /* MERGE IN UNMATCHED SEEDED DATA */
+			        SELECT cast($dow as int) as dow, s.hour, m.san as san, s.adid as adid, s.siteid as siteid, s.segmentid as segmentid, sum(s.impressions) + isnull(sum(dl.impressions),0) as impressions,
+			            sum(s.actions) + isnull(sum(dl.actions),0) as actions, 'Hourly' as data_status
+			                   FROM dbo.DisplaySeedHourly s LEFT OUTER JOIN dbo.DisplayLogsHourly dl
+			                        ON (s.adid=dl.adid AND s.siteid=dl.siteid AND s.segmentid=dl.segmentid AND s.date=dl.date),
+			                        dbo.Media m, dbo.Campaign c
+			                        WHERE s.adid = m.adid
+			                        AND m.san = c.san
+			                        AND c.usepoe = 1
+			                        AND m.active = 1
+			                        AND s.hour = $hour
+			                        AND c.timeStatus = 2
+			                    GROUP BY s.hour, m.san, s.adid, dl.adid, s.siteid, s.segmentid
+			                    HAVING sum(s.impressions) > 0
+			                   UNION
+			                   
+					/**** LIFE OF CAMPAIGN ****/
+			            /* GRAB ALL DATA FOR NEW CAMPAIGNS (UNTIL IT HAS 7 DAYS WORTH) */
+			            SELECT cast($dow as int) as dow, cast($hour as int) as hour, dl.san as san, dl.adid as adid, dl.siteid as siteid, dl.segmentid as segmentid, sum(dl.impressions) + isnull(sum(s.impressions),0) as impressions,
+			            sum(dl.actions) + isnull(sum(s.actions),0) as actions, 'LOC' as data_status
+			                   FROM dbo.DisplayLogsHourly dl LEFT JOIN dbo.DisplaySeedHourly s
+			                   ON (s.adid=dl.adid AND s.siteid=dl.siteid AND s.segmentid=dl.segmentid AND s.date=dl.date), dbo.Media m, dbo.Campaign c
+			                        WHERE dl.adid = m.adid
+			                        AND dl.san = c.san
+			                        AND c.usepoe = 1
+			                        AND c.timeStatus = 1
+			                        AND m.active = 1
+			                        GROUP BY dl.san, dl.adid, dl.siteid, dl.segmentid
+			                        HAVING sum(dl.impressions) + isnull(sum(s.impressions),0) > 0
+			        ) dlh
+			        
+			INNER JOIN
+				dbo.cdoDataAol
+				ON
+				CdoDataAol.adid=dlh.adid
+				AND CdoDataAol.siteid=dlh.siteid
+				AND CdoDataAol.segmentid=dlh.segmentid
+			|;
+			
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> Cell Level: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+		
+### CPS Site Segment LEVEL KNA
+  	my $sql = qq|
+			UPDATE dbo.cdoDataAol
+            SET cdoDataAol.cpsssd_impressions = cpsssd.impressions, cdoDataAol.cpsssd_actions = cpsssd.actions, cdoDataAol.cpsssd_cells = cpsssd.cells, CdoDataAol.dateUpdated=getDate()
+            FROM (SELECT san, size, adgroup, siteid, segmentid, sum(impressions) as impressions, sum(actions) as actions, sum(num_cells) as cells
+                         FROM dbo.CPSSiteSegmentHour
+                         WHERE datepart(weekday, date) = $dow
+                         	AND hour = $hour
+                         GROUP BY san, size, adgroup, siteid, segmentid
+                         HAVING sum(impressions) > 0) cpsssd
+            INNER JOIN
+                dbo.cdoDataAol
+                ON
+                  cdoDataAol.san = cpsssd.san
+                  AND
+                  cdoDataAol.size = cpsssd.size
+                  AND
+                  cdoDataAol.adgroup = cpsssd.adgroup
+                  AND
+                  cdoDataAol.siteid = cpsssd.siteid
+                  AND
+                  cdoDataAol.segmentid = cpsssd.segmentid
+  			|;
+
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> CPS Site Segment Level: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+		
+### CPS Segment LEVEL KNA
+  	my $sql = qq|
+			UPDATE dbo.cdoDataAol
+            SET cdoDataAol.cpssd_impressions = cpssd.impressions, cdoDataAol.cpssd_actions = cpssd.actions, cdoDataAol.cpssd_cells = cpssd.cells, CdoDataAol.dateUpdated=getDate()
+            FROM (SELECT san, size, adgroup, segmentid, sum(impressions) as impressions, sum(actions) as actions, sum(num_cells) as cells
+                         FROM dbo.CPSSegmentHour
+                         WHERE datepart(weekday, date) = $dow
+                         	AND hour = $hour
+                         GROUP BY san, size, adgroup, segmentid
+                         HAVING sum(impressions) > 0) cpssd
+            INNER JOIN
+                    dbo.cdoDataAol
+                    ON
+                      cdoDataAol.san = cpssd.san
+                      AND
+                      cdoDataAol.size = cpssd.size
+                      AND
+                      cdoDataAol.adgroup = cpssd.adgroup
+                      AND
+                      cdoDataAol.segmentid = cpssd.segmentid
+  	|;
+
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> CPS Segment Level: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+		
+### CPS LEVEL KNA
+  	my $sql = qq|
+			UPDATE dbo.cdoDataAol
+            SET cdoDataAol.cps_impressions = cps.impressions, cdoDataAol.cps_actions = cps.actions, cdoDataAol.cps_cells = cps.cells, CdoDataAol.dateUpdated=getDate()
+            FROM (SELECT san, size, adgroup, sum(impressions) as impressions, sum(actions) as actions, sum(num_cells) as cells
+                         FROM dbo.CPSHour
+                         WHERE datepart(weekday, date) = $dow
+                         	AND hour = $hour
+                         GROUP BY san, size, adgroup
+                         HAVING sum(impressions) > 0) cps
+            INNER JOIN
+                    dbo.cdoDataAol
+                    ON
+                      cdoDataAol.san = cps.san
+                      AND
+                      cdoDataAol.size = cps.size
+                      AND
+                      cdoDataAol.adgroup = cps.adgroup
+  	|;
+
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> CPS Level: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+
+### Site Size Segment LEVEL KNA
+    my $sql = qq|
+            UPDATE dbo.cdoDataAol
+            SET cdoDataAol.sssd_impressions = sssd.impressions, cdoDataAol.sssd_actions = sssd.actions, cdoDataAol.sssd_cells = sssd.cells, CdoDataAol.dateUpdated=getDate()
+            FROM (SELECT siteid, size, segmentid, sum(impressions) as impressions, sum(actions) as actions, sum(num_cells) as cells
+                         FROM dbo.SiteSizeSegmentHour
+                         WHERE datepart(weekday, date) = $dow
+                         	AND hour = $hour
+                         GROUP BY siteid, size, segmentid
+                         HAVING sum(impressions) > 0) sssd
+            INNER JOIN
+                    dbo.cdoDataAol
+                    ON
+                      cdoDataAol.siteid = sssd.siteid
+                      AND
+                      cdoDataAol.segmentid = sssd.segmentid
+                      AND
+                      cdoDataAol.size = sssd.size
+                      |;
+
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> Site Size Segment Level: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+
+### Site Size LEVEL KNA
+    my $sql = qq|
+            UPDATE dbo.cdoDataAol
+            SET cdoDataAol.szd_impressions = szd.impressions, cdoDataAol.szd_actions = szd.actions, cdoDataAol.szd_cells = szd.cells, CdoDataAol.dateUpdated=getDate()
+            FROM (SELECT siteid, size, sum(impressions) as impressions, sum(actions) as actions, sum(num_cells) as cells
+                         FROM dbo.SiteSizeHour
+                         WHERE datepart(weekday, date) = $dow
+                         	AND hour = $hour
+                         GROUP BY siteid, size
+                         HAVING sum(impressions) > 0) szd
+            INNER JOIN
+                    dbo.cdoDataAol
+                    ON
+                      cdoDataAol.siteid = szd.siteid
+                      AND
+                      cdoDataAol.size = szd.size
+                      |;
+
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> Site Size Level: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+		
+### Site Segment LEVEL KNA
+    my $sql = qq|
+            UPDATE dbo.cdoDataAol
+            SET cdoDataAol.ssd_impressions = ssd.impressions, cdoDataAol.ssd_actions = ssd.actions, cdoDataAol.ssd_cells = ssd.cells, CdoDataAol.dateUpdated=getDate()
+            FROM (SELECT siteid, segmentid, sum(impressions) as impressions, sum(actions) as actions, sum(num_cells) as cells
+                         FROM dbo.SiteSegmentHour
+                         WHERE datepart(weekday, date) = $dow
+                         	AND hour = $hour
+                         GROUP BY siteid, segmentid
+                         HAVING sum(impressions) > 0) ssd
+            INNER JOIN
+                    dbo.cdoDataAol
+                    ON
+                      cdoDataAol.siteid = ssd.siteid
+                      AND
+                      cdoDataAol.segmentid = ssd.segmentid
+                      |;
+                      
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> Site Segment Level: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+		
+### Segment LEVEL KNA
+    my $sql = qq|
+            UPDATE dbo.cdoDataAol
+            SET cdoDataAol.sd_impressions = sd.impressions, cdoDataAol.sd_actions = sd.actions, cdoDataAol.sd_cells = sd.cells, CdoDataAol.dateUpdated=getDate()
+            FROM (SELECT segmentid, sum(impressions) as impressions, sum(actions) as actions, sum(num_cells) as cells
+                         FROM dbo.SegmentHour
+                         WHERE datepart(weekday, date) = $dow
+                         	AND hour = $hour
+                         GROUP BY segmentid
+                         HAVING sum(impressions) > 0) sd
+            INNER JOIN
+                    dbo.cdoDataAol
+                    ON
+                      cdoDataAol.segmentid = sd.segmentid
+                      |;
+
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":   -> Segment Level: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+		
+### SIZE(SLOT) LEVEL KNA
+    my $sql = qq|
+            UPDATE dbo.cdoDataAol
+            SET cdoDataAol.zd_impressions = zd.impressions, cdoDataAol.zd_actions = zd.actions, cdoDataAol.zd_cells = zd.cells, CdoDataAol.dateUpdated=getDate()
+            FROM (SELECT m.size, sum(md.impressions) as impressions, sum(md.actions) as actions, sum(md.num_cells) as cells
+                         FROM dbo.MediaHour md, dbo.Media m
+                         WHERE md.adid=m.adid
+                         AND datepart(weekday, md.date) = $dow
+                         AND md.hour = $hour
+                         GROUP BY m.size
+                         HAVING sum(impressions) > 0) zd 
+            INNER JOIN
+                    dbo.cdoDataAol
+                    ON
+                      cdoDataAol.size = zd.size
+                      |;
+                      
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, DateFunctions->currentTime().":    -> Size Level: ".$sth->rows." rows updated in CDO.\n");
+		$sth->finish();
+
+	## DBI Disconnect
+	$dbi->disconnect();
+}
+
+sub getImpSignals {
+	
+	my($self, $dow, $phase) = @_;
+	my $df = new DateFunctions;
+	
+	my $delayDate = $df->getApiCurrentDate($phase);
+	
+	## DBI
+	my $dbi = dbiConfig->dbiConnect('');
+	
+	## Impression Time Signal
+		## Site/Seg Level
+#			my $sql = qq|
+#				SELECT cast(s.siteid as varchar)+cast(s.segmentid as varchar)+cast(s.hour as varchar) as ind, s.hour, s.siteid, s.segmentid, sum(s.impressions) as hour_imps, t.total_imps
+#				        FROM dbo.SiteSegmentHour s,
+#				                (SELECT siteid, segmentid, sum(impressions) as total_imps
+#				                        FROM SiteSegmentHour
+#				                        WHERE
+#				                         date >= '$delayDate' AND datepart(weekday, date) = $dow
+#				                        GROUP BY siteid, segmentid ) t
+#				
+#				        WHERE
+#				                s.siteid=t.siteid
+#				                AND s.segmentid=t.segmentid
+#				                AND s.date >= '$delayDate'
+#				                AND datepart(weekday, s.date) = $dow
+#				                AND t.total_imps > 0
+#				GROUP BY cast(s.siteid as varchar) + cast(s.segmentid as varchar) + cast(s.hour as varchar), s.hour, s.siteid, s.segmentid, t.total_imps
+#				ORDER BY siteid, segmentid, hour
+#				|;
+
+			my $sql = qq|
+				SELECT concat(s.siteid,s.segmentid,s.hour) as ind, s.hour, s.siteid, s.segmentid, sum(s.impressions) as hour_imps
+				        FROM SiteSegmentHour s
+				        WHERE
+				        s.date >= '$delayDate'
+				        AND dayofweek(s.date) = $dow
+				GROUP BY concat(s.siteid,s.segmentid,s.hour), s.hour, s.siteid, s.segmentid
+				|;
+		
+			my $sth = $dbi->prepare($sql);
+			   $sth->execute();
+			my $siteSegImpSignal = $sth->fetchall_hashref(ind);
+                           $sth->finish();
+
+
+        	        my $sql = qq|
+				SELECT concat(siteid,segmentid) as ind, sum(impressions) as total_imps
+				FROM SiteSegmentHour
+				WHERE
+				date >= '$delayDate' 
+                                AND dayofweek(date) = $dow
+				GROUP BY concat(siteid,segmentid)
+				|;
+		
+			my $sth = $dbi->prepare($sql);
+			   $sth->execute();
+                        my $siteSegmentTotal = $sth->fetchall_hashref(ind);
+                           $sth->finish();
+
+                        foreach $ssh (keys %{$siteSegImpSignal})
+                        {
+                            my $key = $$siteSegImpSignal{$ssh}{'siteid'}.$$siteSegImpSignal{$ssh}{'segmentid'};
+                            $$siteSegImpSignal{$ssh}{'total_imps'} = $$siteSegmentTotal{$key}{'total_imps'};
+                        }
+
+		
+		## Network Level
+			my $sql = qq|
+				SELECT c.hour as hour, sum(c.impressions) as hour_imps, t.total_imps
+				        FROM CampaignHour c,
+				                (SELECT sum(impressions) as total_imps
+				                        FROM CampaignHour
+				                        WHERE
+				                         date >= '$delayDate'
+				                         AND dayofweek(date) = $dow
+				                  ) t
+				        WHERE
+				                c.date>='$delayDate'
+				                AND dayofweek(c.date) = $dow
+				GROUP BY c.hour, t.total_imps
+				ORDER BY c.hour
+				|;
+				
+			my $sth = $dbi->prepare($sql);
+				$sth->execute();
+			my $networkImpSignal = $sth->fetchall_hashref(hour);
+		
+				$sth->finish();
+	
+	## DBI Disconnect
+	$dbi->disconnect();
+
+	return ($siteSegImpSignal, $networkImpSignal);
+	
+}
+
+sub getBudgetSignal {
+	
+	my($self, $dow, $phase) = @_;
+	my $df = new DateFunctions;
+	
+	my $delayDate = $df->getApiCurrentDate($phase);
+	
+	## DBI
+	my $dbi = dbiConfig->dbiConnect('');
+	
+#	my $sql = qq|
+#		SELECT cast(c.san as varchar) + cast(c.hour as varchar) as ind, c.san, c.hour, sum(c.actions) as hour_actions, t.total_actions
+#		FROM CampaignHour c,
+#		        (SELECT san, sum(actions) as total_actions
+#		                FROM CampaignHour
+#		                WHERE
+#		                 date >= '$delayDate'
+#		                GROUP BY san
+#		        ) t
+#		WHERE
+#		        c.san=t.san
+#		        AND c.date >= '$delayDate'
+#		
+#		GROUP BY cast(c.san as varchar) + cast(c.hour as varchar), c.san, c.hour, t.total_actions
+#		ORDER BY c.san, c.hour
+#				|;
+
+	my $sql = qq|
+		SELECT concat(c.san,c.hour) as ind, c.san, c.hour, sum(c.actions) as hour_actions, t.total_actions
+		FROM CampaignHour c,
+		        (SELECT san, sum(actions) as total_actions
+		                FROM CampaignHour
+		                WHERE
+		                 date >= '$delayDate'
+		                GROUP BY san
+		        ) t
+		WHERE
+		        c.san=t.san
+		        AND c.date >= '$delayDate'
+		
+		GROUP BY concat(c.san,c.hour), c.san, c.hour, t.total_actions
+		ORDER BY c.san, c.hour
+				|;
+
+
+			my $sth = $dbi->prepare($sql);
+				$sth->execute();
+			my $campBudgetSignal = $sth->fetchall_hashref(ind);
+		
+				$sth->finish();
+				
+	my $sql = qq|
+		SELECT c.hour as hour, sum(c.actions) as hour_actions, t.total_actions
+       FROM CampaignHour c,
+            (SELECT sum(actions) as total_actions
+                         FROM CampaignHour
+                         WHERE
+                                date >= '$delayDate'
+                        ) t
+                WHERE
+                        c.date >= '$delayDate'
+
+                GROUP BY c.hour, t.total_actions
+                ORDER BY c.hour
+			|;
+			
+			my $sth = $dbi->prepare($sql);
+				$sth->execute();
+			my $networkBudgetSignal = $sth->fetchall_hashref(hour);
+		
+				$sth->finish();
+				
+	## DBI Disconnect
+	$dbi->disconnect();
+
+	return ($campBudgetSignal, $networkBudgetSignal);
+	
+}
+
+sub populateMD {
+	
+	my($self, $queueKeepDate, $date, $hour, $log) = @_;
+	
+	## DBI
+	my $dbi = dbiConfig->dbiConnect('');
+	
+	## POPULATE MOST RECENT IMPORT HOUR INTO MISDELIVERY
+	$logger->write($log, "\n           -> Populating MD Table using date: $date, hour: $hour");
+	
+	my $sql = qq| INSERT INTO DisplayMisdelivery (date,hour,adid,siteid,segmentid,bid,eimpressions,impressions)
+					SELECT dl.date as date, dl.hour as hour, dl.adid as adid, dl.siteid as siteid, dl.segmentid as segmentid, bq.bid as bid, bq.eimpressions as eimpressions, dl.impressions as impressions
+					        FROM DisplayLogsHourly dl, DisplayBidsQueueAol bq
+					        WHERE dl.adid=bq.adid
+					                AND dl.siteid=bq.siteid
+					                AND dl.segmentid=bq.segmentid
+					                AND dl.date=bq.date
+					                AND dl.hour=bq.hour
+					                AND dl.date = '$date'
+					                AND dl.hour = $hour
+					                AND dl.impressions > 0
+					                AND bq.eimpressions > 0
+				|;
+				
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, "\n".DateFunctions->currentTime().": ".$sth->rows." rows inserted into Misdelivery table.");
+		$sth->finish();
+		
+	## CLEAN UP BIDS QUEUE
+	my $sql = qq| DELETE FROM DisplayBidsQueueAOL
+					WHERE date < '$date'
+					AND hour <= $hour
+				|;
+						
+	my $sth = $dbi->prepare($sql);
+		$sth->execute();
+		$logger->write($log, "\n".DateFunctions->currentTime().": ".$sth->rows." rows deleted from Bid Queue.");
+		$sth->finish();
+		
+				
+	## DBI Disconnect
+	$dbi->disconnect();
+}
+
+sub createPriceVolumeTable
+{
+	my($self, $log) = @_;
+	
+	$logger->write($log, "\n     -> Creating new Temp Table.");
+	
+	#my $sql = qq|CREATE TABLE "dbo"."PriceVolumeTemp" (
+        #"san"                varchar(18),
+        #"siteid"             int,
+        #"segmentid"          int,
+        #"size"               varchar(12),
+        #"bid"                float,
+        #"allocation"         float,
+        #"volume"             int,
+        #"capped_volume"      int
+#		)	
+	#	|;
+
+        my $sql = qq|CREATE TABLE PriceVolumeTemp (
+        san varchar(20) NOT NULL DEFAULT '',
+        siteid int(10) NOT NULL DEFAULT 0,
+        segmentid int(10) NOT NULL DEFAULT 0,
+        size varchar(10) NOT NULL DEFAULT '',
+        bid decimal(4,2) DEFAULT NULL,
+        allocation decimal(3,2) NOT NULL DEFAULT '0.00',
+        volume int(15) DEFAULT NULL,
+        capped_volume int(15) DEFAULT NULL,
+        PRIMARY KEY (san, siteid, segmentid, size, allocation)
+        )
+                    |;
+		
+	## DBI
+	my $dbi = dbiConfig->dbiConnect('');
+	
+	my $sth = $dbi->prepare($sql);
+	$sth->execute();
+	
+	
+}
+
+sub updatePriceVolumeTables
+{
+	my($self, $pvRows, $log) = @_;
+
+	## DBI
+	my $dbi = dbiConfig->dbiConnect('');
+
+	if ($pvRows > 0 )
+	{
+		$logger->write($log, "\n     -> Dropping Main Table.");
+		my $sth = $dbi->prepare("DROP TABLE PriceVolumeTest");
+			$sth->execute();
+			$sth->finish();
+		
+		$logger->write($log, "\n     -> Renaming Temp Table to Main Table.");
+#		my $sth = $dbi->prepare("sp_RENAME 'PriceVolumeTemp', 'PriceVolumeTest'");
+		my $sth = $dbi->prepare("RENAME TABLE PriceVolumeTemp TO PriceVolumeTest");
+			$sth->execute();
+			$sth->finish();
+	}
+	else 
+	{
+		$logger->write($log, "\n     -> FAIL: no P/V Data for any Campaigns.");
+	}
+
+	$dbi->disconnect();
+}
+
+sub populateEVolume
+{
+	my($self, $pvRows, $log) = @_;
+
+	## DBI
+	my $dbi = dbiConfig->dbiConnect('');
+
+	if($pvRows > 0)
+	{
+		## Blow Out Old Table
+		my $sth=$dbi->prepare("TRUNCATE EVolumeTest");
+		$sth->execute();
+		$sth->finish();
+		
+		my $sql = qq|INSERT INTO EVolumeTest
+               			SELECT DISTINCT san, siteid, segmentid, size, volume, capped_volume
+               			FROM PriceVolumeTest|;
+
+     	my $sth = $dbi->prepare($sql);
+     	$sth->execute();
+     	
+     	$logger->write($log, "\n     -> ".$sth->rows()." rows inserted into EVolume.");
+     	$sth->finish();
+	}
+	else
+	{
+		$logger->write($log, "\n     -> No rows entered into EVolume b/c no PV Rows exist.");
+	}
+	
+	$dbi->disconnect();
+}
+
+1;

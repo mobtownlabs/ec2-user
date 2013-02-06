@@ -1,0 +1,13 @@
+use Net::Twitter;
+
+my $tweet->Net::Twitter->new(
+    traits   => [qw/OAuth API::REST/],
+    consumer_key        => 'Y1vCjTEIcz4x9qiBfs8Zw',
+    consumer_secret     => 'Ea1UvVCgkkeRLLwEwfk3flNCcNhtpFU1NaSTI7lg',
+    access_token        => '239128992-8qkkCyey4pk5CKUCtGUpki8jRYEzGyGZvNOoGnuC',
+	access_token_secret => 'VynbfmaVjFTedKFYpcetx83gQ4W1wYeoHfbDvOQSY'
+	);
+
+my $info = $tweet->account_settings();
+
+print $info;

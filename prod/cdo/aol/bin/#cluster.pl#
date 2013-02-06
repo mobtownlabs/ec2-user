@@ -1,0 +1,71 @@
+#!/usr/bin/perl
+
+my $date = "2011-09-26";
+my $h = "20";
+my $file =  "//dp-search01/c\$/AOL_hourly/out/$date/$h/components/lp_objective.txt";
+
+my %network = ();
+my %cluster_map = ();
+open (CELL, $file);
+
+my $cell_ct = 0;
+while (<CELL>)
+{
+    #if ($_ =~ m/138968\_1/)
+    #{
+    if ($_ =~ m/\+/)
+    {
+        $cell_ct++;
+        my ($sign, $coeff, $lp_var) = split(/\s/, $_);
+        my ($san, $adid, $siteid, $segmentid, $size) = split(/\_/, $lp_var);
+        my $placement = $siteid.'_'.$segmentid.'_'.$size;
+        $network{$placement}{$san}{$coeff}{$lp_var} = 1;
+    }
+    #}
+}
+
+print "Regular Network: N = $cell_ct cells.\n";
+foreach $placement (sort keys %network)
+{
+    foreach $san (keys %{$network{$placement}})
+    {
+        foreach $coeff (keys %{$network{$placement}{$san}})
+        {
+            foreach $lp_var (keys %{$network{$placement}{$san}{$coeff}})
+            {
+                #	print "$lp_var\n";
+                my $clusterId = $san."_CLUSTER_".$placement;
+                my $bid = sprintf("%.2f", rand(1)+0.01);
+                
+                $cluster_map{$clusterId}{$lp_var} = 1;
+                $cluster_bid{$clusterId} = $bid;
+            }
+        }
+    }
+}
+
+print "\nClustered Network: K = ".keys(%cluster_map)." cells. \n";
+foreach $clusterid (sort keys %cluster_map)
+{
+#	print "$clusterid\n";
+}
+
+print "\nClustered Network: ".keys(%cluster_bid)." bids. \n";
+foreach $clusterid (sort keys %cluster_bid)
+{
+#	print "$clusterid: $cluster_bid{$clusterid}\n";
+}
+
+print "\nRe-Expanded Network:\n";
+my $exp_ct=0;
+foreach $clusterid (sort keys %cluster_bid)
+{
+    foreach $lp_var (keys %{$cluster_map{$clusterid}})
+    {
+        $exp_ct++;
+#		print "$clusterid: $lp_var -> $cluster_bid{$clusterid}\n";
+    }
+}
+print "Expanded Network: $exp_ct cells\n";
+
+

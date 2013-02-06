@@ -1,0 +1,128 @@
+18:40:02: CDO Logging BEGIN.
+
+
++ Dates/Hours Used (ALL TIMES GMT)
++-----------------------------------------+
++-----------------------------------------+
++ CURRENT (GMT)
++ =============
++ Current Date: 2012-01-25
++ Current Hour: 18
++ Current Day of Week: 4
++
++ LAST (current - 1 hour)
++ =======================
++ Last Hour: 17
++ Last Date: 2012-01-25
++
++ YESTERDAY (current - 24 hrs)
++ ============================
++ Yesterday Date: 2012-01-24
++ 
++ IMPORT (current - parameter)
++ ============================
++ Import Date: 2012-01-25
++ Import Hour: 16
++
++ RE-IMPORT (import - paramter)
++ =============================
++ Re-Import Date: 2012-01-25
++ Re-ImportHour: 11
++
++ MD IMPORT (import - paramter)
++ =============================
++ MD Import Date: 2012-01-25
++ MD Hour: 15 
++
++ CDO (current + 1 hr)
++ ====================
++ CDO Date: 2012-01-25
++ CDO Hour: 19
++ CDO Day Of Week: 4
++-----------------------------------------+
++-----------------------------------------+
+
+Creating folder: /home/ec2-user/prod/cdo/aol/out/2012-01-25/19
+18:40:02: Loading Campaign Budgets
+           -> adchmdpamdec11 has a daily budget of 500.
+           -> aigebi1amjul11 has a daily budget of 2000.
+           -> aiglbckamsep11 has a daily budget of 5000.
+           -> aioapi1amdec10 has a daily budget of 2000.
+           -> aiolbckammay11 has a daily budget of 25000.
+           -> alarmdpamnov11 has a daily budget of 15000.
+           -> auoapi1amdec10 has a daily budget of 250.
+           -> auolbckammay11 has a daily budget of 25000.
+           -> bmcebi1amjul11 has a daily budget of 8000.
+           -> chpcrbnamjan11 has a daily budget of 0.
+           -> chronicamdec11 has a daily budget of 1500.
+           -> gameflyamnov11 has a daily budget of 10000.
+           -> gtarebiamsep11 has a daily budget of 100.
+18:40:02: Loading Cell Level Max Allocations
+           -> 70 cell level allocation caps (see logs).
+18:40:02: Loading Campaign Level Max Allocations
+           -> adchmdpamdec11 has a max allocation of 0.75
+           -> aigebi1amjul11 has a max allocation of 0.05
+           -> aiglbckamsep11 has a max allocation of 0.75
+           -> aioapi1amdec10 has a max allocation of 0.25
+           -> aiolbckammay11 has a max allocation of 0.75
+           -> alarmdpamnov11 has a max allocation of 0.80
+           -> auolbckammay11 has a max allocation of 0.10
+           -> bmcebi1amjul11 has a max allocation of 0.50
+           -> chpcrbnamjan11 has a max allocation of 0.00
+           -> gameflyamnov11 has a max allocation of 0.75
+18:40:02: Getting Campaign PV Availability
+           -> aigebi1amjul11
+           -> aioapi1amdec10
+           -> aiolbckammay11
+           -> alarmdcamjan12
+           -> alarmdpamnov11
+           -> auglbckammay11
+           -> auoapi1amdec10
+           -> auogrndamapr11
+           -> auolbckammay11
+           -> chearonamjan12
+           -> chpcrbnamjan11
+           -> gameflyamnov11
+           -> repllb1amjan12
+           -> reply11amjan12
+           -> reply22amjan12
+18:40:02: Loading Misdelivery Factors
+           -> 0 campaign level misdelivery factors.
+           -> 0 site-segment level misdelivery factors.
+18:40:02: Loading Impression and Budget Curves
+           -> 54095 Site Segment Level Signal Coefficients
+           -> 24 Network Level Signal Coefficients
+           -> 411  Campaign Budget Signal Coefficients
+           -> 24  Network Budget Signal Coefficients
+18:40:12: Loading performance data
+             >> 18:40:31: Level 3 Cells Loaded (DOW/hour)
+             >> 18:40:33: Level 2 Cells Loaded (hour)
+             >> 18:41:04: Level 1 Cells Loaded (LOC)
+           -> 18:41:04: Cell Level Data Loaded
+           -> 18:41:13: CPS Level Loaded
+           -> 18:41:22: Site Level Data Loaded
+           -> 18:41:22: Segment Level Data Loaded
+           -> 18:41:22: Size Level Data Loaded
+           -> 18:41:23: Avail. Impressions Loaded
+18:41:23: Calculating qHats
+           >>> 373603 cells in the network.
+           >>> 170587 cells available to optimize.
+18:42:00: Loading cost data
+           -> 646218 Campaign Level.
+           -> 122562 Site Average.
+18:42:13: Building LP
+           -> Objective and Bounds set
+           -> Budget Constraint set
+18:42:30: Assembling main LP
+18:42:31: solving LP...
+18:45:01: LP solved.
+18:45:01: Calculating Bids
+           -> 646218 bids in map.
+           -> 122562 bids in AVG map.
+           -> 118744 cells with optimized bids.
+           -> 254902 cells with default bids.
+18:45:32: Processing Bids
+Last Bids: /home/ec2-user/prod/cdo/aol/out/2012-01-25/18/bids/optBids.csv
+Current Bids: /home/ec2-user/prod/cdo/aol/out/2012-01-25/19/bids/optBids.csv
+118702
+18:45:35: 118702 bids set to be uploaded.

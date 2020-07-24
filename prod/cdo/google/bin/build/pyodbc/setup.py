@@ -253,7 +253,7 @@ def _get_version_git():
 
     n, result = getoutput('git branch')
     branch = re.search(r'\* (\w+)', result).group(1)
-    if branch != 'master' and not re.match('^v\d+$', branch):
+    if branch != 'main' and not re.match('^v\d+$', branch):
         name = branch + '-' + name
 
     return name, numbers

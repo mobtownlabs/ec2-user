@@ -52,8 +52,8 @@ jobname = 'MM Logs Jobflow %s' %dt.datetime.now()
 jobid = conne.run_jobflow(name=jobname,
                           log_uri='s3://dphive/debug/',
                           ec2_keyname='dpaws',
-                          master_instance_type='c1.medium',
-                          slave_instance_type='c1.medium',
+                          main_instance_type='c1.medium',
+                          subordinate_instance_type='c1.medium',
                           num_instances=3,
                           steps=[step1, step2])
 
